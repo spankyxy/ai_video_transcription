@@ -8,6 +8,9 @@ import os
 app = Flask(__name__)
 CORS(app)
 
+# Initialize YouTube Transcript API (new API)
+ytt_api = YouTubeTranscriptApi()
+
 def extract_video_id(url_or_id):
     """YouTube URL'den video ID çıkart veya ID'yi döndür"""
     patterns = [
@@ -60,51 +63,43 @@ def get_transcript():
         
         print(f"Fetching transcript for video ID: {video_id}")
         
-        # Transcript'i çek
+        # YENİ API: Transcript'i direkt çek (daha basit!)
         try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        except Exception as list_error:
-            print(f"Error listing transcripts: {str(list_error)}")
-            return jsonify({'error': f'Transcript listelenemedi: {str(list_error)}'}), 400
-        
-        # İstenen dili bulmaya çalış
-        transcript = None
-        try:
-            transcript = transcript_list.find_transcript([language_code])
-            print(f"Found transcript in language: {language_code}")
-        except Exception as find_error:
-            print(f"Language {language_code} not found, trying any available...")
-            # Mevcut ilk transcript'i al
-            try:
-                for t in transcript_list:
-                    transcript = t
-                    print(f"Using available transcript: {t.language}")
-                    break
-            except Exception as iter_error:
-                print(f"Error iterating transcripts: {str(iter_error)}")
-                return jsonify({'error': 'Bu video için hiçbir transcript bulunamadı'}), 404
-        
-        if not transcript:
-            return jsonify({'error': 'Bu video için transcript bulunamadı'}), 404
-        
-        # Transcript verisini al
-        try:
-            transcript_data = transcript.fetch()
-            print(f"Fetched {len(transcript_data)} transcript segments")
+            # fetch() metodu direkt FetchedTranscript objesi döndürür
+            fetched_transcript = ytt_api.fetch(video_id, languages=[language_code])
+            print(f"Successfully fetched transcript in language: {language_code}")
         except Exception as fetch_error:
-            print(f"Error fetching transcript data: {str(fetch_error)}")
-            return jsonify({'error': f'Transcript verisi alınamadı: {str(fetch_error)}'}), 500
+            print(f"Failed to fetch in {language_code}, trying English...")
+            try:
+                # Fallback to English
+                fetched_transcript = ytt_api.fetch(video_id, languages=['en'])
+                print(f"Successfully fetched English transcript")
+            except Exception as en_error:
+                print(f"Failed to fetch English transcript, trying any available...")
+                try:
+                    # Try any available language
+                    fetched_transcript = ytt_api.fetch(video_id)
+                    print(f"Successfully fetched transcript in default language")
+                except Exception as any_error:
+                    print(f"No transcript available: {str(any_error)}")
+                    return jsonify({'error': f'Bu video için transcript bulunamadı: {str(any_error)}'}), 404
+        
+        # FetchedTranscript objesi direkt kullanılabilir
+        # to_raw_data() ile list[dict] formatına çevirebiliriz
+        transcript_data = fetched_transcript.to_raw_data()
         
         if not transcript_data:
             return jsonify({'error': 'Transcript verisi boş'}), 404
         
+        print(f"Fetched {len(transcript_data)} transcript segments")
+        
         # Yanıtı formatla
         result = {
-            'video_id': video_id,
-            'language': transcript.language,
-            'language_code': transcript.language_code,
-            'is_generated': transcript.is_generated,
-            'is_translatable': transcript.is_translatable,
+            'video_id': fetched_transcript.video_id,
+            'language': fetched_transcript.language,
+            'language_code': fetched_transcript.language_code,
+            'is_generated': fetched_transcript.is_generated,
+            'is_translatable': False,  # FetchedTranscript'te bu property yok
             'full_text': ' '.join([item['text'] for item in transcript_data]),
             'snippets': [
                 {
@@ -148,7 +143,8 @@ def get_available_languages():
         if not video_id:
             return jsonify({'error': 'Geçersiz YouTube URL veya video ID'}), 400
         
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # YENİ API: list() metodu kullan
+        transcript_list = ytt_api.list(video_id)
         
         languages = []
         for transcript in transcript_list:
@@ -165,6 +161,7 @@ def get_available_languages():
         }), 200
         
     except Exception as e:
+        print(f"Error listing languages: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
