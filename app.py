@@ -42,8 +42,12 @@ def health_check():
 
 @app.route('/api/transcript', methods=['POST'])
 def get_transcript():
+    video_id = None
     try:
         data = request.json
+        if not data:
+            return jsonify({'error': 'Request body gerekli'}), 400
+            
         video_input = data.get('video_id') or data.get('url')
         language_code = data.get('language_code', 'en')
         
@@ -54,18 +58,45 @@ def get_transcript():
         if not video_id:
             return jsonify({'error': 'Geçersiz YouTube URL veya video ID'}), 400
         
+        print(f"Fetching transcript for video ID: {video_id}")
+        
         # Transcript'i çek
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        except Exception as list_error:
+            print(f"Error listing transcripts: {str(list_error)}")
+            return jsonify({'error': f'Transcript listelenemedi: {str(list_error)}'}), 400
         
         # İstenen dili bulmaya çalış
+        transcript = None
         try:
             transcript = transcript_list.find_transcript([language_code])
-        except:
+            print(f"Found transcript in language: {language_code}")
+        except Exception as find_error:
+            print(f"Language {language_code} not found, trying any available...")
             # Mevcut ilk transcript'i al
-            transcript = next(iter(transcript_list))
+            try:
+                for t in transcript_list:
+                    transcript = t
+                    print(f"Using available transcript: {t.language}")
+                    break
+            except Exception as iter_error:
+                print(f"Error iterating transcripts: {str(iter_error)}")
+                return jsonify({'error': 'Bu video için hiçbir transcript bulunamadı'}), 404
+        
+        if not transcript:
+            return jsonify({'error': 'Bu video için transcript bulunamadı'}), 404
         
         # Transcript verisini al
-        transcript_data = transcript.fetch()
+        try:
+            transcript_data = transcript.fetch()
+            print(f"Fetched {len(transcript_data)} transcript segments")
+        except Exception as fetch_error:
+            print(f"Error fetching transcript data: {str(fetch_error)}")
+            return jsonify({'error': f'Transcript verisi alınamadı: {str(fetch_error)}'}), 500
+        
+        if not transcript_data:
+            return jsonify({'error': 'Transcript verisi boş'}), 404
         
         # Yanıtı formatla
         result = {
@@ -86,14 +117,23 @@ def get_transcript():
             'total_duration': transcript_data[-1]['start'] + transcript_data[-1]['duration'] if transcript_data else 0
         }
         
+        print(f"Successfully processed transcript for {video_id}")
         return jsonify(result), 200
         
     except TranscriptsDisabled:
-        return jsonify({'error': 'Bu video için altyazılar devre dışı'}), 400
+        error_msg = f'Bu video için altyazılar devre dışı (Video ID: {video_id})'
+        print(f"TranscriptsDisabled: {error_msg}")
+        return jsonify({'error': error_msg}), 400
     except NoTranscriptFound:
-        return jsonify({'error': 'Bu video için transcript bulunamadı'}), 404
+        error_msg = f'Bu video için transcript bulunamadı (Video ID: {video_id})'
+        print(f"NoTranscriptFound: {error_msg}")
+        return jsonify({'error': error_msg}), 404
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        error_msg = f'Beklenmeyen hata: {str(e)}'
+        print(f"Exception: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': error_msg}), 500
 
 @app.route('/api/transcript/languages', methods=['POST'])
 def get_available_languages():
