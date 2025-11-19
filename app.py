@@ -66,7 +66,7 @@ def get_transcript():
         # YENİ API: Transcript'i direkt çek (daha basit!)
         try:
             # fetch() metodu direkt FetchedTranscript objesi döndürür
-            fetched_transcript = ytt_api.fetch("3RmOvxilbPM", languages=["en"])
+            fetched_transcript = ytt_api.fetch(video_id, languages=[language_code])
             print(f"Successfully fetched transcript in language: {language_code}")
         except Exception as fetch_error:
             print(f"Failed to fetch in {language_code}, trying English...")
